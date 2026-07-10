@@ -2,6 +2,7 @@
 
 #include "pluginlib/class_list_macros.hpp"
 
+#include <chrono>
 #include <cmath>
 
 #include <sensor_msgs/point_cloud2_iterator.hpp>
@@ -50,24 +51,24 @@ void ElevationLayer::updateCosts(
   int /*max_i*/,
   int /*max_j*/)
 {
-  if (!latest_cloud_) {
+  sensor_msgs::msg::PointCloud2::SharedPtr cloud;
+  {
+    std::lock_guard<std::mutex> lock(cloud_mutex_);
+    cloud = latest_cloud_;
+  }
+
+  if (!cloud) {
     return;
   }
 
-  sensor_msgs::msg::PointCloud2 cloud_odom;
+  auto start_time = std::chrono::high_resolution_clock::now();
 
+  geometry_msgs::msg::TransformStamped tf;
   try {
-    auto tf =
-      tf_buffer_->lookupTransform(
+    tf = tf_buffer_->lookupTransform(
       layered_costmap_->getGlobalFrameID(),
-      latest_cloud_->header.frame_id,
+      cloud->header.frame_id,
       tf2::TimePointZero);
-
-    tf2::doTransform(
-      *latest_cloud_,
-      cloud_odom,
-      tf);
-
   } catch (tf2::TransformException & ex) {
 
     RCLCPP_WARN(
@@ -84,21 +85,43 @@ void ElevationLayer::updateCosts(
   const unsigned int size_y =
     master_grid.getSizeInCellsY();
 
-  struct CellInfo
-  {
-    bool initialized = false;
-    float z_min = 0.0f;
-    float z_max = 0.0f;
-  };
+  const size_t cell_count = static_cast<size_t>(size_x) * size_y;
+  if (cells_.size() != cell_count) {
+    cells_.assign(cell_count, CellInfo{});
+    touched_cells_.clear();
+    const size_t point_count = static_cast<size_t>(cloud->width) * cloud->height;
+    touched_cells_.reserve(std::min(cell_count, point_count));
+  }
 
-  std::vector<CellInfo> cells(size_x * size_y);
+  // Build the rotation matrix once. Transforming XYZ directly avoids allocating
+  // and copying an entire transformed PointCloud2 on every costmap update.
+  const auto & q = tf.transform.rotation;
+  const double xx = q.x * q.x;
+  const double yy = q.y * q.y;
+  const double zz = q.z * q.z;
+  const double xy = q.x * q.y;
+  const double xz = q.x * q.z;
+  const double yz = q.y * q.z;
+  const double wx = q.w * q.x;
+  const double wy = q.w * q.y;
+  const double wz = q.w * q.z;
+  const double r00 = 1.0 - 2.0 * (yy + zz);
+  const double r01 = 2.0 * (xy - wz);
+  const double r02 = 2.0 * (xz + wy);
+  const double r10 = 2.0 * (xy + wz);
+  const double r11 = 1.0 - 2.0 * (xx + zz);
+  const double r12 = 2.0 * (yz - wx);
+  const double r20 = 2.0 * (xz - wy);
+  const double r21 = 2.0 * (yz + wx);
+  const double r22 = 1.0 - 2.0 * (xx + yy);
+  const auto & translation = tf.transform.translation;
 
   sensor_msgs::PointCloud2ConstIterator<float>
-  iter_x(cloud_odom, "x");
+  iter_x(*cloud, "x");
   sensor_msgs::PointCloud2ConstIterator<float>
-  iter_y(cloud_odom, "y");
+  iter_y(*cloud, "y");
   sensor_msgs::PointCloud2ConstIterator<float>
-  iter_z(cloud_odom, "z");
+  iter_z(*cloud, "z");
 
   //
   // 点群を走査して zmin / zmax を集計
@@ -107,9 +130,13 @@ void ElevationLayer::updateCosts(
     iter_x != iter_x.end();
     ++iter_x, ++iter_y, ++iter_z)
   {
-    const float x = *iter_x;
-    const float y = *iter_y;
-    const float z = *iter_z;
+    const float source_x = *iter_x;
+    const float source_y = *iter_y;
+    const float source_z = *iter_z;
+    const double x = r00 * source_x + r01 * source_y + r02 * source_z + translation.x;
+    const double y = r10 * source_x + r11 * source_y + r12 * source_z + translation.y;
+    const float z = static_cast<float>(
+      r20 * source_x + r21 * source_y + r22 * source_z + translation.z);
 
     unsigned int mx;
     unsigned int my;
@@ -126,13 +153,14 @@ void ElevationLayer::updateCosts(
     const unsigned int index =
       master_grid.getIndex(mx, my);
 
-    auto & cell = cells[index];
+    auto & cell = cells_[index];
 
     if (!cell.initialized) {
 
       cell.initialized = true;
       cell.z_min = z;
       cell.z_max = z;
+      touched_cells_.push_back(index);
 
     } else {
 
@@ -147,47 +175,37 @@ void ElevationLayer::updateCosts(
   //
   // Δzからコスト生成
   //
-  for (unsigned int my = 0;
-    my < size_y;
-    ++my)
-  {
-    for (unsigned int mx = 0;
-      mx < size_x;
-      ++mx)
-    {
-      const unsigned int index =
-        master_grid.getIndex(mx, my);
+  for (const unsigned int index : touched_cells_) {
+    auto & cell = cells_[index];
 
-      const auto & cell =
-        cells[index];
+    const float dz =
+      cell.z_max - cell.z_min;
 
-      if (!cell.initialized) {
-        continue;
-      }
+    unsigned char cost;
 
-      const float dz =
-        cell.z_max - cell.z_min;
+    if (dz >= 0.30f) {
 
-      unsigned char cost;
+      cost = 254;
 
-      if (dz >= 0.30f) {
+    } else {
 
-        cost = 254;
-
-      } else {
-
-        cost = static_cast<unsigned char>(
-          std::min(
-            254.0f,
-            dz / 0.30f * 254.0f));
-      }
-
-      master_grid.setCost(
-        mx,
-        my,
-        cost);
+      cost = static_cast<unsigned char>(
+        std::min(
+          254.0f,
+          dz / 0.30f * 254.0f));
     }
+
+    master_grid.getCharMap()[index] = cost;
+    cell.initialized = false;
   }
+  touched_cells_.clear();
+
+  auto end_time = std::chrono::high_resolution_clock::now();
+  std::chrono::duration<double, std::milli> elapsed = end_time - start_time;
+  RCLCPP_INFO(
+    logger_,
+    "updateCosts took %f ms",
+    elapsed.count());
 }
 
 // reset //
@@ -202,6 +220,7 @@ bool ElevationLayer::isClearable()
 
 void ElevationLayer::pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr msg)
 {
+  std::lock_guard<std::mutex> lock(cloud_mutex_);
   latest_cloud_ = msg;
 }
 

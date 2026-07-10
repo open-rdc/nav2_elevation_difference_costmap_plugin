@@ -10,6 +10,9 @@
 
 #include <tf2_sensor_msgs/tf2_sensor_msgs.hpp>
 
+#include <mutex>
+#include <vector>
+
 namespace nav2_elevation_difference_costmap_plugin
 {
 
@@ -41,8 +44,20 @@ public:
   void pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr msg);
 
 private:
+  struct CellInfo
+  {
+    bool initialized{false};
+    float z_min{0.0f};
+    float z_max{0.0f};
+  };
+
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr points_sub_;
   sensor_msgs::msg::PointCloud2::SharedPtr latest_cloud_;
+  std::mutex cloud_mutex_;
+
+  // Reused between updates to avoid allocating and clearing the whole costmap.
+  std::vector<CellInfo> cells_;
+  std::vector<unsigned int> touched_cells_;
 
   std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
   std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
