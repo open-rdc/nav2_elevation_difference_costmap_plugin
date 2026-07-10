@@ -19,12 +19,11 @@ void ElevationLayer::onInitialize()
   auto node = node_.lock();
 
   points_sub_ = node->create_subscription<sensor_msgs::msg::PointCloud2>(
-      "/surestar_points", rclcpp::SensorDataQoS(), std::bind(&ElevationLayer::pointCloudCallback, this, std::placeholders::_1));
+    "/surestar_points", rclcpp::SensorDataQoS(),
+    std::bind(&ElevationLayer::pointCloudCallback, this, std::placeholders::_1));
 
   tf_buffer_ = std::make_shared<tf2_ros::Buffer>(node->get_clock());
   tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
-
-  need_recalculation_ = true;
 }
 
 void ElevationLayer::updateBounds(
@@ -46,10 +45,10 @@ void ElevationLayer::updateBounds(
 // circle wave //
 void ElevationLayer::updateCosts(
   nav2_costmap_2d::Costmap2D & master_grid,
-  int min_i,
-  int min_j,
-  int max_i,
-  int max_j)
+  int /*min_i*/,
+  int /*min_j*/,
+  int /*max_i*/,
+  int /*max_j*/)
 {
   if (!latest_cloud_) {
     return;
@@ -60,9 +59,9 @@ void ElevationLayer::updateCosts(
   try {
     auto tf =
       tf_buffer_->lookupTransform(
-        layered_costmap_->getGlobalFrameID(),
-        latest_cloud_->header.frame_id,
-        tf2::TimePointZero);
+      layered_costmap_->getGlobalFrameID(),
+      latest_cloud_->header.frame_id,
+      tf2::TimePointZero);
 
     tf2::doTransform(
       *latest_cloud_,
@@ -72,7 +71,7 @@ void ElevationLayer::updateCosts(
   } catch (tf2::TransformException & ex) {
 
     RCLCPP_WARN(
-      rclcpp::get_logger("GradientLayer"),
+      logger_,
       "%s",
       ex.what());
 
@@ -95,18 +94,18 @@ void ElevationLayer::updateCosts(
   std::vector<CellInfo> cells(size_x * size_y);
 
   sensor_msgs::PointCloud2ConstIterator<float>
-    iter_x(cloud_odom, "x");
+  iter_x(cloud_odom, "x");
   sensor_msgs::PointCloud2ConstIterator<float>
-    iter_y(cloud_odom, "y");
+  iter_y(cloud_odom, "y");
   sensor_msgs::PointCloud2ConstIterator<float>
-    iter_z(cloud_odom, "z");
+  iter_z(cloud_odom, "z");
 
   //
   // 点群を走査して zmin / zmax を集計
   //
   for (;
-       iter_x != iter_x.end();
-       ++iter_x, ++iter_y, ++iter_z)
+    iter_x != iter_x.end();
+    ++iter_x, ++iter_y, ++iter_z)
   {
     const float x = *iter_x;
     const float y = *iter_y;
@@ -116,10 +115,10 @@ void ElevationLayer::updateCosts(
     unsigned int my;
 
     if (!master_grid.worldToMap(
-          x,
-          y,
-          mx,
-          my))
+        x,
+        y,
+        mx,
+        my))
     {
       continue;
     }
@@ -149,12 +148,12 @@ void ElevationLayer::updateCosts(
   // Δzからコスト生成
   //
   for (unsigned int my = 0;
-       my < size_y;
-       ++my)
+    my < size_y;
+    ++my)
   {
     for (unsigned int mx = 0;
-         mx < size_x;
-         ++mx)
+      mx < size_x;
+      ++mx)
     {
       const unsigned int index =
         master_grid.getIndex(mx, my);
