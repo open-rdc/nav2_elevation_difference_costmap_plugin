@@ -2,8 +2,10 @@
 
 import argparse
 import os
+import random
 import signal
 import subprocess
+import struct
 import sys
 import tempfile
 import threading
@@ -126,7 +128,7 @@ def ensure_costmap_active(node_name):
 
 
 class PoseCheckNode(Node):
-    def __init__(self):
+    def __init__(self, step_height, ground_tilt_x, ground_tilt_y, noise):
         super().__init__("elevation_layer_pose_check")
         self.br = TransformBroadcaster(self)
         self.cloud_pub = self.create_publisher(PointCloud2, "/surestar_points", 10)
@@ -134,15 +136,24 @@ class PoseCheckNode(Node):
             OccupancyGrid, "/costmap/costmap", self.on_costmap, 10
         )
         self.costmap_counts = []
+        self.costmap_maxes = []
         self.offset_x = 0.0
         self.offset_y = 0.0
+        self.step_height = step_height
+        self.ground_tilt_x = ground_tilt_x
+        self.ground_tilt_y = ground_tilt_y
+        self.noise = noise
+        self.rng = random.Random(42)
         self.timer = self.create_timer(0.05, self.publish_inputs)
 
     def on_costmap(self, msg):
         occupied = sum(1 for value in msg.data if value > 0)
+        max_cost = max(msg.data) if msg.data else 0
         self.costmap_counts.append(occupied)
+        self.costmap_maxes.append(max_cost)
         if len(self.costmap_counts) > 80:
             self.costmap_counts.pop(0)
+            self.costmap_maxes.pop(0)
 
     def publish_inputs(self):
         stamp = self.get_clock().now().to_msg()
@@ -179,15 +190,41 @@ class PoseCheckNode(Node):
 
     def make_cloud(self, stamp):
         points = []
-        for ix in range(-6, 7):
-            for iy in range(-6, 7):
-                x = ix * 0.12
-                y = iy * 0.12
-                points.append((x, y, 0.0))
-                points.append((x, y, 0.45))
+        self.rng.seed(42)
+
+        # A slightly tilted ground plane, a 5 cm curb-like step, and sparse noise.
+        # The vertical points near x=0 put both lower and upper heights in the
+        # same costmap cells so this layer can measure z_max - z_min.
+        for ix in range(-16, 17):
+            for iy in range(-14, 15):
+                base_x = ix * 0.08
+                base_y = iy * 0.08
+                x = base_x + self.rng.uniform(-0.018, 0.018)
+                y = base_y + self.rng.uniform(-0.018, 0.018)
+                ground_z = self.ground_tilt_x * x + self.ground_tilt_y * y
+                step_z = self.step_height if x >= 0.0 else 0.0
+                z = ground_z + step_z + self.rng.uniform(-self.noise, self.noise)
+                points.append((x, y, z))
+
+                if abs(base_x) <= 0.04:
+                    lower_z = self.ground_tilt_x * x + self.ground_tilt_y * y
+                    for ratio in (0.0, 0.25, 0.5, 0.75, 1.0):
+                        column_z = (
+                            lower_z
+                            + self.step_height * ratio
+                            + self.rng.uniform(-self.noise, self.noise)
+                        )
+                        points.append((x, y, column_z))
+
+        for _ in range(80):
+            x = self.rng.uniform(-1.25, 1.25)
+            y = self.rng.uniform(-1.1, 1.1)
+            ground_z = self.ground_tilt_x * x + self.ground_tilt_y * y
+            step_z = self.step_height if x >= 0.0 else 0.0
+            z = ground_z + step_z + self.rng.uniform(-self.noise * 2.0, self.noise * 2.0)
+            points.append((x, y, z))
 
         data = bytearray()
-        import struct
 
         for point in points:
             data.extend(struct.pack("<fff", *point))
@@ -213,13 +250,40 @@ class PoseCheckNode(Node):
         while time.monotonic() < deadline:
             time.sleep(0.1)
             if self.costmap_counts and max(self.costmap_counts[-10:]) > 0:
-                return max(self.costmap_counts[-10:])
-        return 0
+                return (
+                    max(self.costmap_counts[-10:]),
+                    max(self.costmap_maxes[-10:]),
+                )
+        return (0, 0)
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--rviz", action="store_true", help="also open RViz2")
+    parser.add_argument(
+        "--step-height",
+        type=float,
+        default=0.05,
+        help="height of the synthetic curb in meters",
+    )
+    parser.add_argument(
+        "--ground-tilt-x",
+        type=float,
+        default=0.02,
+        help="ground z slope per meter in the x direction",
+    )
+    parser.add_argument(
+        "--ground-tilt-y",
+        type=float,
+        default=-0.01,
+        help="ground z slope per meter in the y direction",
+    )
+    parser.add_argument(
+        "--noise",
+        type=float,
+        default=0.006,
+        help="deterministic random z noise in meters",
+    )
     args = parser.parse_args()
 
     params_file = make_params_file()
@@ -237,7 +301,12 @@ def main():
 
     try:
         rclpy.init()
-        node = PoseCheckNode()
+        node = PoseCheckNode(
+            args.step_height,
+            args.ground_tilt_x,
+            args.ground_tilt_y,
+            args.noise,
+        )
         spin_stop = threading.Event()
 
         def spin_node():
@@ -255,18 +324,29 @@ def main():
             rviz = start_process(["rviz2", "-d", str(rviz_config)], "rviz2")
 
         try:
+            print(
+                "[scene] tilted ground, random scatter, "
+                f"{args.step_height * 100:.1f} cm step"
+            )
             print("[check] initial pose: map->odom = (0, 0)")
             node.offset_x = 0.0
             node.offset_y = 0.0
-            initial_count = node.wait_for_costs(8.0)
-            print(f"[result] initial occupied cells: {initial_count}")
+            initial_count, initial_max = node.wait_for_costs(8.0)
+            print(
+                f"[result] initial occupied cells: {initial_count}, "
+                f"max cost: {initial_max}"
+            )
 
             print("[check] after pose correction: map->odom = (5, 2)")
             node.costmap_counts.clear()
+            node.costmap_maxes.clear()
             node.offset_x = 5.0
             node.offset_y = 2.0
-            shifted_count = node.wait_for_costs(8.0)
-            print(f"[result] shifted occupied cells: {shifted_count}")
+            shifted_count, shifted_max = node.wait_for_costs(8.0)
+            print(
+                f"[result] shifted occupied cells: {shifted_count}, "
+                f"max cost: {shifted_max}"
+            )
 
             if initial_count <= 0:
                 print("NG: initial costmap did not receive elevation costs.")
