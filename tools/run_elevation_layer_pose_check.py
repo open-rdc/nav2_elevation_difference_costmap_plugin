@@ -337,11 +337,11 @@ def main():
                 f"max cost: {initial_max}"
             )
 
-            print("[check] after pose correction: map->odom = (5, 2)")
+            print("[check] after pose correction: map->odom = (0.5, 0.2)")
             node.costmap_counts.clear()
             node.costmap_maxes.clear()
-            node.offset_x = 5.0
-            node.offset_y = 2.0
+            node.offset_x = 0.5
+            node.offset_y = 0.2
             shifted_count, shifted_max = node.wait_for_costs(8.0)
             print(
                 f"[result] shifted occupied cells: {shifted_count}, "
