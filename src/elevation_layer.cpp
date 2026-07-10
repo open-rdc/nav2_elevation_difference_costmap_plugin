@@ -60,7 +60,7 @@ void ElevationLayer::updateCosts(
   try {
     auto tf =
       tf_buffer_->lookupTransform(
-        "odom",
+        layered_costmap_->getGlobalFrameID(),
         latest_cloud_->header.frame_id,
         tf2::TimePointZero);
 
@@ -211,4 +211,3 @@ PLUGINLIB_EXPORT_CLASS(
   nav2_costmap_2d::Layer)
 
 }
-
