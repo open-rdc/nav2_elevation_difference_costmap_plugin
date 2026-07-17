@@ -29,6 +29,7 @@ find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(tf2_sensor_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(std_msgs REQUIRED)
 
 add_library(
   nav2_elevation_difference_costmap_plugin_core
@@ -50,6 +51,7 @@ ament_target_dependencies(
   tf2
   tf2_ros
   tf2_sensor_msgs
+  std_msgs
 )
 
 pluginlib_export_plugin_description_file(

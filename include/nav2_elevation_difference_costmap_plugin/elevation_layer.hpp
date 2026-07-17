@@ -10,6 +10,8 @@
 #include <mutex>
 #include <vector>
 
+#include <std_msgs/msg/float32_multi_array.hpp>
+
 namespace nav2_elevation_difference_costmap_plugin
 {
 
@@ -44,6 +46,7 @@ private:
     bool initialized{false};
     float z_min{0.0f};
     float z_max{0.0f};
+    unsigned int point_count{0};
   };
 
   void pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr msg);
@@ -51,6 +54,8 @@ private:
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr points_sub_;
   sensor_msgs::msg::PointCloud2::SharedPtr latest_cloud_;
   std::mutex cloud_mutex_;
+
+  rclcpp::Publisher<std_msgs::msg::Float32MultiArray>::SharedPtr cell_data_pub_;
 
   // Keep only cells hit in the current update, avoiding a full-grid scan.
   std::vector<CellInfo> cells_;

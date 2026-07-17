@@ -66,9 +66,17 @@ void ElevationLayer::onInitialize()
 {
   auto node = node_.lock();
 
+  if (!node) {
+    throw std::runtime_error("Failed to lock node");
+  }
+
   points_sub_ = node->create_subscription<sensor_msgs::msg::PointCloud2>(
     "/surestar_points", rclcpp::SensorDataQoS(),
     std::bind(&ElevationLayer::pointCloudCallback, this, std::placeholders::_1));
+
+  cell_data_pub_ = node->create_publisher<std_msgs::msg::Float32MultiArray>(
+    "/elevation_cell_data",
+    rclcpp::QoS(1).reliable());
 
   tf_buffer_ = std::make_shared<tf2_ros::Buffer>(node->get_clock());
   tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
@@ -164,22 +172,80 @@ void ElevationLayer::updateCosts(
       cell.initialized = true;
       cell.z_min = z;
       cell.z_max = z;
+      cell.point_count = 1;
+
       touched_cells_.push_back(index);
     } else {
       cell.z_min = std::min(cell.z_min, z);
       cell.z_max = std::max(cell.z_max, z);
+      ++cell.point_count;
     }
   }
 
   auto * costmap = master_grid.getCharMap();
+
+  // ==========================================
+  // 追加1：1フレーム分の送信メッセージを作る
+  // ==========================================
+  std_msgs::msg::Float32MultiArray output_msg;
+  // 1セルにつき6個の値を格納する
+  output_msg.data.reserve(touched_cells_.size() * 6);
+  // indexからmx, myを求めるために必要
+  const unsigned int size_x = master_grid.getSizeInCellsX();
+
   for (const unsigned int index : touched_cells_) {
     auto & cell = cells_[index];
     const float difference = cell.z_max - cell.z_min;
+
+    // ========================================
+    // 追加2：Costmap上のセル番号を求める
+    // ========================================
+    const unsigned int mx = index % size_x;
+    const unsigned int my = index / size_x;
+
+    // ========================================
+    // 追加3：セル番号をワールド座標へ変換
+    // ========================================
+    double wx = 0.0;
+    double wy = 0.0;
+
+    master_grid.mapToWorld(
+      mx,
+      my,
+      wx,
+      wy);
+
+    // ========================================
+    // 追加4：Pythonへ送る値を格納
+    // ========================================
+    output_msg.data.push_back(
+      static_cast<float>(wx));
+
+    output_msg.data.push_back(
+      static_cast<float>(wy));
+
+    output_msg.data.push_back(cell.z_min);
+    output_msg.data.push_back(cell.z_max);
+    output_msg.data.push_back(difference);
+
+    output_msg.data.push_back(
+      static_cast<float>(cell.point_count));
+
     costmap[index] = difference >= kMaxElevationDifference ?
       kMaxCost :
       static_cast<unsigned char>(difference * kMaxCost / kMaxElevationDifference);
+
     cell.initialized = false;
+    cell.point_count = 0;
   }
+
+  // ==========================================
+  // 追加5：1フレーム分をトピックへ送信
+  // ==========================================
+  if (!output_msg.data.empty() && cell_data_pub_) {
+    cell_data_pub_->publish(output_msg);
+  }
+
   touched_cells_.clear();
 
   const auto elapsed = std::chrono::steady_clock::now() - start_time;
