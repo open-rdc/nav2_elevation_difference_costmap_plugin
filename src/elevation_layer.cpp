@@ -10,7 +10,7 @@
 namespace
 {
 
-constexpr float kMaxElevationDifference = 0.30f;
+constexpr float kMaxElevationDifference = 0.03; //0.01f; //0.30f;
 constexpr unsigned char kMaxCost = 254;
 
 struct TransformMatrix
