@@ -49,6 +49,23 @@ private:
     unsigned int point_count{0};
   };
 
+  struct BeamFilter
+  {
+    bool enabled = true;
+    bool negative = true;
+
+    double xmin = -0.70; //-0.69;
+    double xmax =  0.70; //1.40;
+
+    double ymin = -0.45; //-0.10;
+    double ymax =  1.00; //1.00;
+
+    double zmin = -2.0;
+    double zmax =  2.0;
+  };
+
+  BeamFilter beam_filter_;
+
   void pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr msg);
 
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr points_sub_;

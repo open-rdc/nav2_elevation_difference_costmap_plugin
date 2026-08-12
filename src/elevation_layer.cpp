@@ -10,8 +10,9 @@
 namespace
 {
 
-constexpr float kMaxElevationDifference = 0.01f; //0.30f;
-constexpr unsigned char kMaxCost = 254;
+  constexpr float kMinElevationDifference = 0.005f;
+  constexpr float kMaxElevationDifference = 0.01f; //0.30f;
+  constexpr unsigned char kMaxCost = 254;
 
 struct TransformMatrix
 {
@@ -80,6 +81,24 @@ void ElevationLayer::onInitialize()
 
   tf_buffer_ = std::make_shared<tf2_ros::Buffer>(node->get_clock());
   tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
+
+  node->declare_parameter(name_ + ".beam_filter.enabled", beam_filter_.enabled);
+  node->declare_parameter(name_ + ".beam_filter.negative", beam_filter_.negative);
+  node->declare_parameter(name_ + ".beam_filter.xmin", beam_filter_.xmin);
+  node->declare_parameter(name_ + ".beam_filter.xmax", beam_filter_.xmax);
+  node->declare_parameter(name_ + ".beam_filter.ymin", beam_filter_.ymin);
+  node->declare_parameter(name_ + ".beam_filter.ymax", beam_filter_.ymax);
+  node->declare_parameter(name_ + ".beam_filter.zmin", beam_filter_.zmin);
+  node->declare_parameter(name_ + ".beam_filter.zmax", beam_filter_.zmax);
+
+  node->get_parameter(name_ + ".beam_filter.enabled", beam_filter_.enabled);
+  node->get_parameter(name_ + ".beam_filter.negative", beam_filter_.negative);
+  node->get_parameter(name_ + ".beam_filter.xmin", beam_filter_.xmin);
+  node->get_parameter(name_ + ".beam_filter.xmax", beam_filter_.xmax);
+  node->get_parameter(name_ + ".beam_filter.ymin", beam_filter_.ymin);
+  node->get_parameter(name_ + ".beam_filter.ymax", beam_filter_.ymax);
+  node->get_parameter(name_ + ".beam_filter.zmin", beam_filter_.zmin);
+  node->get_parameter(name_ + ".beam_filter.zmax", beam_filter_.zmax);
 }
 
 void ElevationLayer::updateBounds(
@@ -158,6 +177,26 @@ void ElevationLayer::updateCosts(
     const double y = transform.y(source_x, source_y, source_z);
     const float z = transform.z(source_x, source_y, source_z);
 
+bool inside =
+    source_x >= beam_filter_.xmin &&
+    source_x <= beam_filter_.xmax &&
+    source_y >= beam_filter_.ymin &&
+    source_y <= beam_filter_.ymax &&
+    source_z >= beam_filter_.zmin &&
+    source_z <= beam_filter_.zmax;
+
+if (beam_filter_.enabled) {
+    if (beam_filter_.negative) {
+        if (inside) {
+            continue;
+        }
+    } else {
+        if (!inside) {
+            continue;
+        }
+    }
+}
+
     unsigned int mx;
     unsigned int my;
 
@@ -231,9 +270,24 @@ void ElevationLayer::updateCosts(
     output_msg.data.push_back(
       static_cast<float>(cell.point_count));
 
-    costmap[index] = difference >= kMaxElevationDifference ?
-      kMaxCost :
-      static_cast<unsigned char>(difference * kMaxCost / kMaxElevationDifference);
+    // costmap[index] = difference >= kMaxElevationDifference ?
+    //   kMaxCost :
+    //   static_cast<unsigned char>(difference * kMaxCost / kMaxElevationDifference);
+
+    // if (difference < kMinElevationDifference) {
+    //   costmap[index] = 0;
+    // }
+
+    if (difference < kMinElevationDifference) {
+      costmap[index] = 0;
+    } else if (difference >= kMaxElevationDifference) {
+      costmap[index] = kMaxCost;
+    } else {
+      costmap[index] = static_cast<unsigned char>(
+        (difference - kMinElevationDifference) *
+        kMaxCost /
+        (kMaxElevationDifference - kMinElevationDifference));
+    }
 
     cell.initialized = false;
     cell.point_count = 0;
