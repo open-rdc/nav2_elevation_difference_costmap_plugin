@@ -3,14 +3,16 @@
 
 #include "nav2_costmap_2d/layer.hpp"
 #include "nav2_costmap_2d/layered_costmap.hpp"
+
+#include <geometry_msgs/msg/transform_stamped.hpp>
+#include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <tf2_ros/buffer.h>
 #include <tf2_ros/transform_listener.h>
 
+#include <memory>
 #include <mutex>
 #include <vector>
-
-#include <std_msgs/msg/float32_multi_array.hpp>
 
 namespace nav2_elevation_difference_costmap_plugin
 {
@@ -21,6 +23,7 @@ public:
   ElevationLayer() = default;
 
   void onInitialize() override;
+
   void updateBounds(
     double robot_x,
     double robot_y,
@@ -38,6 +41,7 @@ public:
     int max_j) override;
 
   void reset() override;
+
   bool isClearable() override;
 
 private:
@@ -54,34 +58,43 @@ private:
     bool enabled = true;
     bool negative = true;
 
-    double xmin = -0.70; //-0.69;
-    double xmax =  0.70; //1.40;
+    double xmin = -0.70;
+    double xmax = 0.70;
 
-    double ymin = -0.45; //-0.10;
-    double ymax =  1.00; //1.00;
+    double ymin = -0.45;
+    double ymax = 1.00;
 
     double zmin = -2.0;
-    double zmax =  2.0;
+    double zmax = 2.0;
   };
+
+  void pointCloudCallback(
+    const sensor_msgs::msg::PointCloud2::SharedPtr msg);
+
+  void matchSize();
 
   BeamFilter beam_filter_;
 
-  void pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr msg);
+  rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr
+    points_sub_;
 
-  rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr points_sub_;
   sensor_msgs::msg::PointCloud2::SharedPtr latest_cloud_;
+
   std::mutex cloud_mutex_;
 
-  rclcpp::Publisher<std_msgs::msg::Float32MultiArray>::SharedPtr cell_data_pub_;
-
-  // Keep only cells hit in the current update, avoiding a full-grid scan.
   std::vector<CellInfo> cells_;
   std::vector<unsigned int> touched_cells_;
 
   std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
   std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
+
+  bool enabled_ = true;
+
+  static constexpr float kMinElevationDifference = 0.005f;
+  static constexpr float kMaxElevationDifference = 0.01f;
+  static constexpr unsigned char kMaxCost = 254;
 };
 
-}
+}  // namespace nav2_elevation_difference_costmap_plugin
 
 #endif  // NAV2_ELEVATION_DIFFERENCE_COSTMAP_PLUGIN__ELEVATION_LAYER_HPP_
