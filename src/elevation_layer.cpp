@@ -426,10 +426,15 @@ void ElevationLayer::updateCosts(
   auto node = node_.lock();
 
   if (node) {
-    RCLCPP_INFO_THROTTLE(
+    // RCLCPP_INFO_THROTTLE(
+    //   logger_,
+    //   *node->get_clock(),
+    //   1000,
+    //   "updateCosts took %.3f ms",
+    //   elapsed.count());
+
+    RCLCPP_INFO(
       logger_,
-      *node->get_clock(),
-      1000,
       "updateCosts took %.3f ms",
       elapsed.count());
   }
