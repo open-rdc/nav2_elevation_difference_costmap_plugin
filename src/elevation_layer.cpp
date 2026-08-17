@@ -64,7 +64,7 @@ void ElevationLayer::onInitialize()
 
   declareParameter(
     "topic",
-    rclcpp::ParameterValue("/surestar_points"));
+    rclcpp::ParameterValue("/livox/lidar"));
 
   declareParameter(
     "beam_filter.enabled",
