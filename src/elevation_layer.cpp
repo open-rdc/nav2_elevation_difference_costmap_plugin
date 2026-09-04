@@ -208,10 +208,27 @@ void ElevationLayer::updateBounds(
     return;
   }
 
-  *min_x = -100.0;
-  *min_y = -100.0;
-  *max_x = 100.0;
-  *max_y = 100.0;
+  const auto * master = layered_costmap_->getCostmap();
+
+  if (master->getSizeInCellsX() == 0 || master->getSizeInCellsY() == 0) {
+    return;
+  }
+
+  // updateCosts writes directly into the master grid. Request its full extent
+  // so that old costs are reset and all written cells are updated/published.
+  // Read the geometry each cycle to follow resizing and rolling origins.
+  const double origin_x = master->getOriginX();
+  const double origin_y = master->getOriginY();
+  const double end_x =
+    origin_x + master->getSizeInCellsX() * master->getResolution();
+  const double end_y =
+    origin_y + master->getSizeInCellsY() * master->getResolution();
+
+  // Like CostmapLayer::touch(), only expand bounds requested by other layers.
+  *min_x = std::min(*min_x, origin_x);
+  *min_y = std::min(*min_y, origin_y);
+  *max_x = std::max(*max_x, end_x);
+  *max_y = std::max(*max_y, end_y);
 }
 
 void ElevationLayer::updateCosts(
