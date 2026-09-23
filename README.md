@@ -71,3 +71,9 @@ RViz2上で`/costmap/costmap`, `/surestar_points`, `TF`を確認できます.
 
 この確認用ノードは, 5cm程度の段差, 少し傾いた地面, ランダムに散った点群を`/surestar_points`へ出します.
 RViz2で黒く見える地面や段差付近の色は, pluginが点群から計算したcostmapです.
+
+## License
+
+This project is licensed under the BSD 3-Clause License.
+
+Copyright (c) 2026 Shuma Suzuki
