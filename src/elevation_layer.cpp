@@ -347,6 +347,10 @@ void ElevationLayer::updateCosts(
   const TransformMatrix transform(
     tf.transform);
 
+  // footprint内外の判定に使う変換
+  const TransformMatrix base_transform(
+    cloud_to_base.transform);
+
   sensor_msgs::PointCloud2ConstIterator<float> iter_x(
     *cloud,
     "x");
@@ -361,14 +365,42 @@ void ElevationLayer::updateCosts(
 
   const auto footprint = layered_costmap_->getFootprint();
 
-  for (;iter_x != iter_x.end(); ++iter_x, ++iter_y, ++iter_z)
+  for (; iter_x != iter_x.end(); ++iter_x, ++iter_y, ++iter_z)
   {
-    if (footprint_filter_enabled_ &&
-        isInsideFootprint(base_x, base_y, footprint))
+    // 入力点群から各点の座標を読み取る
+    const float source_x = *iter_x;
+    const float source_y = *iter_y;
+    const float source_z = *iter_z;
+
+    // 無効な座標の点は計算対象から除外
+    if (!std::isfinite(source_x) ||
+        !std::isfinite(source_y) ||
+        !std::isfinite(source_z))
     {
       continue;
     }
 
+    if (footprint_filter_enabled_) {
+      // 点群座標系 → ロボット基準座標系
+      const double base_x =
+        base_transform.r00 * source_x +
+        base_transform.r01 * source_y +
+        base_transform.r02 * source_z +
+        base_transform.translation.x;
+
+      const double base_y =
+        base_transform.r10 * source_x +
+        base_transform.r11 * source_y +
+        base_transform.r12 * source_z +
+        base_transform.translation.y;
+
+      // footprint内・辺上の点を除外
+      if (isInsideFootprint(base_x, base_y, footprint)) {
+        continue;
+      }
+    }
+
+    // 点群座標系 → コストマップのglobal frame
     const double x =
       transform.r00 * source_x +
       transform.r01 * source_y +
