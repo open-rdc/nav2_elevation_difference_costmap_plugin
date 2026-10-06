@@ -34,6 +34,7 @@
 #include <chrono>
 #include <mutex>
 #include <stdexcept>
+#include <cmath>
 
 #include "pluginlib/class_list_macros.hpp"
 #include "sensor_msgs/point_cloud2_iterator.hpp"
@@ -80,6 +81,62 @@ struct TransformMatrix
   double r22;
 };
 
+bool isInsideFootprint(
+  double x,
+  double y,
+  const std::vector<geometry_msgs::msg::Point> & footprint)
+{
+  if (footprint.size() < 3 ||
+      !std::isfinite(x) || !std::isfinite(y))
+  {
+    return false;
+  }
+
+  constexpr double epsilon = 1e-6;  // 辺上判定の許容距離[m]
+  bool inside = false;
+
+  for (size_t i = 0, j = footprint.size() - 1;
+       i < footprint.size();
+       j = i++)
+  {
+    const auto & a = footprint[j];
+    const auto & b = footprint[i];
+
+    const double dx = b.x - a.x;
+    const double dy = b.y - a.y;
+    const double length_squared = dx * dx + dy * dy;
+
+    // 点と辺の最短距離を求める
+    double t = 0.0;
+    if (length_squared > 0.0) {
+      t = ((x - a.x) * dx + (y - a.y) * dy) / length_squared;
+      t = std::max(0.0, std::min(1.0, t));
+    }
+
+    const double distance_x = x - (a.x + t * dx);
+    const double distance_y = y - (a.y + t * dy);
+
+    // 辺上の点もfootprint内として扱う
+    if (distance_x * distance_x + distance_y * distance_y <=
+        epsilon * epsilon)
+    {
+      return true;
+    }
+
+    // 点から右方向へ伸ばした半直線と辺の交差を判定
+    if ((a.y > y) != (b.y > y)) {
+      const double intersection_x =
+        a.x + (y - a.y) * dx / dy;
+
+      if (x < intersection_x) {
+        inside = !inside;
+      }
+    }
+  }
+
+  return inside;
+}
+
 }  // namespace
 
 void ElevationLayer::onInitialize()
@@ -97,36 +154,8 @@ void ElevationLayer::onInitialize()
     rclcpp::ParameterValue("/livox/lidar"));
 
   declareParameter(
-    "beam_filter.enabled",
+    "footprint_filter.enabled",
     rclcpp::ParameterValue(true));
-
-  declareParameter(
-    "beam_filter.negative",
-    rclcpp::ParameterValue(true));
-
-  declareParameter(
-    "beam_filter.xmin",
-    rclcpp::ParameterValue(-0.70));
-
-  declareParameter(
-    "beam_filter.xmax",
-    rclcpp::ParameterValue(0.70));
-
-  declareParameter(
-    "beam_filter.ymin",
-    rclcpp::ParameterValue(-0.45));
-
-  declareParameter(
-    "beam_filter.ymax",
-    rclcpp::ParameterValue(1.00));
-
-  declareParameter(
-    "beam_filter.zmin",
-    rclcpp::ParameterValue(-2.0));
-
-  declareParameter(
-    "beam_filter.zmax",
-    rclcpp::ParameterValue(2.0));
 
   node->get_parameter(
     name_ + ".enabled",
@@ -139,36 +168,13 @@ void ElevationLayer::onInitialize()
     topic);
 
   node->get_parameter(
-    name_ + ".beam_filter.enabled",
-    beam_filter_.enabled);
+    name_ + ".footprint_filter.enabled",
+    footprint_filter_enabled_);
 
+  // costmap本体に設定されたロボット基準フレームを取得
   node->get_parameter(
-    name_ + ".beam_filter.negative",
-    beam_filter_.negative);
-
-  node->get_parameter(
-    name_ + ".beam_filter.xmin",
-    beam_filter_.xmin);
-
-  node->get_parameter(
-    name_ + ".beam_filter.xmax",
-    beam_filter_.xmax);
-
-  node->get_parameter(
-    name_ + ".beam_filter.ymin",
-    beam_filter_.ymin);
-
-  node->get_parameter(
-    name_ + ".beam_filter.ymax",
-    beam_filter_.ymax);
-
-  node->get_parameter(
-    name_ + ".beam_filter.zmin",
-    beam_filter_.zmin);
-
-  node->get_parameter(
-    name_ + ".beam_filter.zmax",
-    beam_filter_.zmax);
+    "robot_base_frame",
+    robot_base_frame_);
 
   tf_buffer_ =
     std::make_shared<tf2_ros::Buffer>(
@@ -290,11 +296,22 @@ void ElevationLayer::updateCosts(
 
   geometry_msgs::msg::TransformStamped tf;
 
+  // 追加：点群座標系 → ロボット基準座標系のTF
+  geometry_msgs::msg::TransformStamped cloud_to_base;
+
   try {
     tf = tf_buffer_->lookupTransform(
       layered_costmap_->getGlobalFrameID(),
       cloud->header.frame_id,
       tf2::TimePointZero);
+
+    // 追加：footprint内外の判定に使うTF
+    if (footprint_filter_enabled_) {
+      cloud_to_base = tf_buffer_->lookupTransform(
+        robot_base_frame_,
+        cloud->header.frame_id,
+        tf2::TimePointZero);
+      }
   } catch (const tf2::TransformException & ex) {
     RCLCPP_WARN(
       logger_,
@@ -342,34 +359,14 @@ void ElevationLayer::updateCosts(
     *cloud,
     "z");
 
-  for (;
-    iter_x != iter_x.end();
-    ++iter_x,
-    ++iter_y,
-    ++iter_z)
+  const auto footprint = layered_costmap_->getFootprint();
+
+  for (;iter_x != iter_x.end(); ++iter_x, ++iter_y, ++iter_z)
   {
-    const float source_x = *iter_x;
-    const float source_y = *iter_y;
-    const float source_z = *iter_z;
-
-    if (beam_filter_.enabled) {
-      const bool inside =
-        source_x >= beam_filter_.xmin &&
-        source_x <= beam_filter_.xmax &&
-        source_y >= beam_filter_.ymin &&
-        source_y <= beam_filter_.ymax &&
-        source_z >= beam_filter_.zmin &&
-        source_z <= beam_filter_.zmax;
-
-      if (beam_filter_.negative) {
-        if (inside) {
-          continue;
-        }
-      } else {
-        if (!inside) {
-          continue;
-        }
-      }
+    if (footprint_filter_enabled_ &&
+        isInsideFootprint(base_x, base_y, footprint))
+    {
+      continue;
     }
 
     const double x =

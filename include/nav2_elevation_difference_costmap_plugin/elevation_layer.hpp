@@ -45,6 +45,7 @@
 #include <memory>
 #include <mutex>
 #include <vector>
+#include <string>
 
 namespace nav2_elevation_difference_costmap_plugin
 {
@@ -85,27 +86,14 @@ private:
     unsigned int point_count{0};
   };
 
-  struct BeamFilter
-  {
-    bool enabled = true;
-    bool negative = true;
-
-    double xmin = -0.70;
-    double xmax = 0.70;
-
-    double ymin = -0.45;
-    double ymax = 1.00;
-
-    double zmin = -2.0;
-    double zmax = 2.0;
-  };
+  bool footprint_filter_enabled_{true};
 
   void pointCloudCallback(
     const sensor_msgs::msg::PointCloud2::SharedPtr msg);
 
   void matchSize();
 
-  BeamFilter beam_filter_;
+  std::string robot_base_frame_;
 
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr
     points_sub_;

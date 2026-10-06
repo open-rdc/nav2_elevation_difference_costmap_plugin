@@ -19,9 +19,11 @@ source install/setup.bash
 
 ## Nav2 Params
 
-`nav2_params.yaml`のcostmap pluginsに`elevation_layer`を追加します.
+`nav2_params.yaml`のcostmap pluginsに`elevation_layer`を追加します.  
+
 
 ```yaml
+# local costmapの例
 local_costmap:
   local_costmap:
     ros__parameters:
