@@ -256,7 +256,7 @@ RCLCPP_WARN(
   logger_,
   "updateCosts: enabled_ = %s",
   enabled_ ? "true" : "false");
-  
+
   if (!enabled_) {
     return;
   }
@@ -471,10 +471,10 @@ RCLCPP_WARN(
     //   "updateCosts took %.3f ms",
     //   elapsed.count());
 
-    RCLCPP_INFO(
-      logger_,
-      "updateCosts took %.3f ms",
-      elapsed.count());
+    // RCLCPP_INFO(
+    //   logger_,
+    //   "updateCosts took %.3f ms",
+    //   elapsed.count());
   }
 }
 
