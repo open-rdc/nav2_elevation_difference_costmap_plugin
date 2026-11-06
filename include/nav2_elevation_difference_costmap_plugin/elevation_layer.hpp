@@ -96,6 +96,7 @@ private:
   rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr dyn_params_handler_;
 
   std::atomic<bool> enabled_{true};
+  std::atomic<bool> need_clear_{false};
 
   static constexpr float kMinElevationDifference = 0.005f;
   static constexpr float kMaxElevationDifference = 0.01f;

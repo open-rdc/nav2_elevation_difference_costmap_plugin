@@ -215,7 +215,8 @@ void ElevationLayer::updateBounds(
   double * max_x,
   double * max_y)
 {
-  if (!enabled_) {
+
+  if (!enabled_ && !need_clear_.exchange(false)) {
     return;
   }
 
@@ -510,6 +511,10 @@ ElevationLayer::dynamicParametersCallback(
       if (enabled_ != parameter.as_bool()) {
 
         enabled_ = parameter.as_bool();
+
+        if (!enabled_) {
+          need_clear_ = true;
+        }
 
         if (enabled_) {
           current_ = false;
