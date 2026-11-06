@@ -98,13 +98,17 @@ void ElevationLayer::onInitialize()
     "beam_filter.zmax",
     rclcpp::ParameterValue(2.0));
 
-  bool enabled = true;
+  // bool enabled = true;
 
-  node->get_parameter(
+  // node->get_parameter(
+  //   name_ + ".enabled",
+  //   enabled);
+
+  // enabled_.store(enabled);
+
+    node->get_parameter(
     name_ + ".enabled",
-    enabled);
-
-  enabled_.store(enabled);
+    enabled_);
 
   dyn_params_handler_ =
     node->add_on_set_parameters_callback(
