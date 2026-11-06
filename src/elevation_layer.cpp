@@ -98,17 +98,14 @@ void ElevationLayer::onInitialize()
     "beam_filter.zmax",
     rclcpp::ParameterValue(2.0));
 
-  // bool enabled = true;
+  bool enabled = true;
 
-  // node->get_parameter(
-  //   name_ + ".enabled",
-  //   enabled);
-
-  // enabled_.store(enabled);
-
-    node->get_parameter(
+  node->get_parameter(
     name_ + ".enabled",
-    enabled_);
+    enabled);
+
+  enabled_.store(enabled);
+
 
   dyn_params_handler_ =
     node->add_on_set_parameters_callback(
@@ -254,6 +251,12 @@ void ElevationLayer::updateCosts(
   int /*max_i*/,
   int /*max_j*/)
 {
+
+RCLCPP_WARN(
+  logger_,
+  "updateCosts: enabled_ = %s",
+  enabled_ ? "true" : "false");
+  
   if (!enabled_) {
     return;
   }
@@ -512,6 +515,12 @@ ElevationLayer::dynamicParametersCallback(
       param_name == name_ + ".enabled" &&
       param_type == rclcpp::ParameterType::PARAMETER_BOOL)
     {
+
+      RCLCPP_WARN(
+        logger_,
+        "Received enabled parameter: %s",
+        parameter.as_bool() ? "true" : "false");
+
       if (enabled_ != parameter.as_bool()) {
 
         enabled_ = parameter.as_bool();
